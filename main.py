@@ -59,15 +59,22 @@ class CustomStyle(QProxyStyle):
     def subElementRect(self, element, option, widget=None):
         rect = super().subElementRect(element, option, widget)
         if element == QStyle.SE_ItemViewItemCheckIndicator:  # 체크박스 크기 설정
-            rect.setWidth(120)  # 체크박스 너비
+            rect.setWidth(100)  # 체크박스 너비
             rect.setHeight(30)  # 체크박스 높이
         return rect
 
 class WrappingItemDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        """텍스트 줄바꿈을 적용하여 항목 그리기"""
+        option.textWrap = True  # 텍스트 줄바꿈 활성화
+        super().paint(painter, option, index)
+
     def sizeHint(self, option, index):
+        """항목의 크기 조정 (높이를 늘려 2줄 표시 가능)"""
         size = super().sizeHint(option, index)
-        size.setHeight(size.height() * 2)  # 높이를 2배로 늘려줄 수 있음
+        size.setHeight(size.height() * 2)  # 기본 높이를 2배로 늘림
         return size
+    
 class RealSenseRecorder:
     def __init__(self, output_path, fps, frame_size):
         self.output_path = output_path
@@ -150,8 +157,35 @@ class RealSenseApp(QMainWindow):
             print(f"Output path updated to: {self.output_path}")  
             
     def toggle_checklist_save(self):
-        """checklist 저장"""
-        
+        """checktreeWidget의 체크 상태를 JSON 파일로 저장"""
+        def extract_checked_states(item):
+            """재귀적으로 트리 항목의 체크 상태를 추출"""
+            data = {}
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.childCount() > 0:
+                    # 하위 트리가 존재하는 경우 재귀 호출
+                    sub_data = extract_checked_states(child)
+                    if sub_data:  # 하위 항목 중 체크된 상태가 있으면 저장
+                        data[child.text(0)] = sub_data
+                else:
+                    # 하위 트리가 없는 경우 체크 상태 저장
+                    if child.flags() & Qt.ItemIsUserCheckable:
+                        data[child.text(0)] = (child.checkState(1) == Qt.Checked)
+            return data
+
+        # 트리의 루트 항목에서 체크 상태 추출
+        root = self.checktreeWidget.invisibleRootItem()
+        checklist_data = extract_checked_states(root)
+
+        # JSON 파일로 저장
+        file_path = "checkList.json"
+        create_path(self.output_path+'/'+self.numberEdit.text())
+        output_path = os.path.join(self.output_path+'/'+self.numberEdit.text(), file_path )
+       
+        with open(output_path, "w", encoding="utf-8") as file:
+            json.dump(checklist_data, file, ensure_ascii=False, indent=2)
+        print(f"체크 상태가 {output_path}에 저장되었습니다.")
             
     def toggle_output_path(self):
         """출력 경로 변경"""
