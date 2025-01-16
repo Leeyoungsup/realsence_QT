@@ -3,12 +3,90 @@ import pyrealsense2 as rs
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QListWidgetItem
 from PyQt5.uic import loadUi
 from display import CameraView
-from PyQt5.QtWidgets import QGridLayout
+from PyQt5.QtWidgets import QGridLayout,QTreeWidgetItem
 from PyQt5.QtCore import Qt, QTimer  # Qt 네임스페이스 추가
 import numpy as np
 import cv2
 import copy
+import os
+from datetime import datetime
+from PyQt5.QtWidgets import QFileDialog
+import json
+from PyQt5.QtWidgets import QProxyStyle, QStyle
+from PyQt5.QtWidgets import QStyledItemDelegate
 
+
+def load_json(file_path):
+    with open(file_path, "r", encoding="utf-8") as file:
+        return json.load(file)
+def create_path(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+def populate_tree(tree, json_data):
+    def add_items(parent, data):
+        if isinstance(data, dict):
+            for key, value in data.items():
+                item = QTreeWidgetItem(parent)
+                item.setText(0, key)
+                item.setFlags(item.flags() | Qt.ItemIsTristate)
+                if isinstance(value, bool):
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(1, Qt.Checked if value else Qt.Unchecked)
+                else:
+                    add_items(item, value)
+        elif isinstance(data, bool):
+            parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable)
+            parent.setCheckState(1, Qt.Checked if data else Qt.Unchecked)
+
+    # 트리 초기화
+    tree.setHeaderLabels(["항목", "수행 여부"])
+    tree.setColumnWidth(0, 300)  # 열 크기 설정
+    tree.header().setStretchLastSection(False)  # 마지막 열 자동 확장 비활성화
+
+    # JSON 데이터 추가
+    add_items(tree.invisibleRootItem(), json_data)
+
+def handle_item_click(item, column):
+    """
+    수행 여부의 빈칸 클릭 시 체크박스 상태 변경
+    """
+    if column == 1:  # 수행 여부 열을 클릭한 경우
+        current_state = item.checkState(1)
+        new_state = Qt.Checked if current_state == Qt.Unchecked else Qt.Unchecked
+        item.setCheckState(1, new_state)
+
+class CustomStyle(QProxyStyle):
+    def subElementRect(self, element, option, widget=None):
+        rect = super().subElementRect(element, option, widget)
+        if element == QStyle.SE_ItemViewItemCheckIndicator:  # 체크박스 크기 설정
+            rect.setWidth(120)  # 체크박스 너비
+            rect.setHeight(30)  # 체크박스 높이
+        return rect
+
+class WrappingItemDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(size.height() * 2)  # 높이를 2배로 늘려줄 수 있음
+        return size
+class RealSenseRecorder:
+    def __init__(self, output_path, fps, frame_size):
+        self.output_path = output_path
+        self.fps = fps
+        self.frame_size = frame_size
+        self.writer = cv2.VideoWriter(
+            self.output_path,
+            cv2.VideoWriter_fourcc(*'mp4v'),  # 코덱 설정 (예: XVID, MP4V 등)
+            self.fps,
+            self.frame_size
+        )
+
+    def write_frame(self, frame):
+        """프레임을 파일로 저장"""
+        self.writer.write(frame)
+
+    def close(self):
+        """비디오 저장 종료"""
+        self.writer.release()
 
 class RealSenseApp(QMainWindow):
     def __init__(self):
@@ -16,7 +94,7 @@ class RealSenseApp(QMainWindow):
 
         # UI 로드
         loadUi("front.ui", self)
-
+        data=load_json('checkList.json')
         # RealSense Context 초기화
         self.context = rs.context()
         self.devices = []  # 연결된 카메라 목록
@@ -26,10 +104,103 @@ class RealSenseApp(QMainWindow):
         # UI 연결
         self.wholeCheck.stateChanged.connect(self.toggle_all_cameras)
         self.playButton.clicked.connect(self.start_streaming)
+        self.outputpathButton.clicked.connect(self.toggle_output_path_load)
         self.cameraList.itemChanged.connect(self.toggle_camera_view)
+        self.outputEdit.textChanged.connect(self.toggle_output_path)
         self.cameraList.itemDoubleClicked.connect(self.enable_item_edit) 
+        self.checktreeWidget.setStyle(CustomStyle())  # 체크박스 크기 변경
+        self.checktreeWidget.setItemDelegate(WrappingItemDelegate())  # 텍스트 줄바꿈 활성화
+        self.resetButton.clicked.connect(self.reset_checktree_widget)
+        self.saveButton.clicked.connect(self.toggle_checklist_save)
+        # 녹화 상태
+        self.recording = False
+        self.recorder = {}
+        self.depth_recorder = {}
+        self.output_path = "Z:/Workspace/YS_Lee/realsense/data"
+        # 녹화 버튼 연결
+        self.recordButton.clicked.connect(self.toggle_recording)
+        self.outputEdit.setText(self.output_path)
+        self.numberEdit.setText("D001")
+        populate_tree(self.checktreeWidget,data)
         # 카메라 목록 업데이트
         self.populate_camera_list()
+    def reset_checktree_widget(self):
+        """checktreeWidget의 모든 체크 상태를 초기화"""
+        def reset_items(item):
+            """재귀적으로 하위 항목까지 초기화"""
+            for i in range(item.childCount()):
+                child = item.child(i)
+                if child.flags() & Qt.ItemIsUserCheckable:
+                    child.setCheckState(1, Qt.Unchecked)  # 체크 해제
+                reset_items(child)
+
+        root = self.checktreeWidget.invisibleRootItem()
+        reset_items(root)
+        print("checktreeWidget의 체크 상태가 초기화되었습니다.") 
+    def toggle_output_path_load(self):
+        """출력 경로를 파일 탐색기를 통해 설정"""
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory",  # 대화 상자 제목
+            self.output_path  # 기본 경로
+        )
+        if directory:  # 사용자가 경로를 선택한 경우
+            self.output_path = directory
+            self.outputEdit.setText(self.output_path)  # UI 출력 경로 업데이트
+            print(f"Output path updated to: {self.output_path}")  
+            
+    def toggle_checklist_save(self):
+        """checklist 저장"""
+        
+            
+    def toggle_output_path(self):
+        """출력 경로 변경"""
+        self.output_path = self.outputEdit.text()
+        print(f"Output path updated to: {self.output_path}")    
+        
+    def toggle_recording(self):
+        """녹화 시작/중단"""
+        if not self.recording:
+            print("녹화 시작")
+            start_time = datetime.now().strftime("%Y%m%d_%H%M%S")  # 시작 시간 포맷팅
+            for i, (device, (camera_view, pipeline)) in enumerate(self.views.items()):
+                camera_name = self.cameraList.item(i).text()  # camera_list에서 이름 가져오기
+                sanitized_name = camera_name.replace(" ", "_").replace(":", "_")  # 파일명에 적합하도록 변경
+                file_name = f"{sanitized_name}_{start_time}_RGB.mp4"  # 이름 + 시간 조합
+                create_path(self.output_path+'/'+self.numberEdit.text())
+                output_path = os.path.join(self.output_path+'/'+self.numberEdit.text(), file_name)
+
+                self.recorder[device] = RealSenseRecorder(
+                    output_path=output_path,
+                    fps=30,
+                    frame_size=(640, 480)  # 프레임 크기 설정
+                )
+                if camera_view.show_depth:
+                    self.depth_recorder[device] = RealSenseRecorder(
+                        output_path=output_path.replace("_RGB.mp4", "_depth.mp4"),
+                        fps=30,
+                        frame_size=(640, 480)  # 프레임 크기 설정
+                    )
+                print(f"Recording started for {camera_name}: {output_path}")
+
+            self.recording = True
+            self.recordButton.setText("녹화 중단")
+        else:
+            print("녹화 중단")
+            if self.recorder:
+                for device in self.recorder.keys():
+                    if self.recorder[device] is not None:
+                        self.recorder[device].close()
+                        print(f"Recording stopped for {device.get_info(rs.camera_info.name)}")
+                        self.recorder[device] = None
+                for device in self.depth_recorder.keys():
+                    if self.depth_recorder[device] is not None:
+                        self.depth_recorder[device].close()
+                        print(f"Recording stopped for {device.get_info(rs.camera_info.name)}")
+                        self.depth_recorder[device] = None
+            self.recording = False
+            self.recordButton.setText("녹화 시작")
+    
     def enable_item_edit(self, item):
         """항목 더블클릭 시 편집 모드 활성화"""
         item.setFlags(item.flags() | Qt.ItemIsEditable) 
@@ -111,8 +282,6 @@ class RealSenseApp(QMainWindow):
         self.views[device] = (camera_view, pipeline)
         self.timers[device] = timer
 
-
-
     def find_empty_cell(self, layout):
         """2x2 그리드에서 빈 셀의 좌표를 찾음"""
         rows, cols = 2, 2  # 2x2 그리드
@@ -174,15 +343,19 @@ class RealSenseApp(QMainWindow):
 
         # RGB 이미지 업데이트
         color_image = np.asanyarray(color_frame.get_data())
-
+        if self.recording:
+            self.recorder[device].write_frame(copy.deepcopy(color_image))
         # Depth 이미지 업데이트 (USB 3.0인 경우만)
         depth_colormap = None
         if depth_frame:
             depth_image = np.asanyarray(depth_frame.get_data())
+            
             depth_colormap = cv2.applyColorMap(
                 cv2.convertScaleAbs(depth_image, alpha=0.2), cv2.COLORMAP_JET
             )
-
+            if self.recording:
+                depth_3channel = np.stack([cv2.convertScaleAbs(depth_image, alpha=0.2)] * 3, axis=-1) 
+                self.depth_recorder[device].write_frame(copy.deepcopy(depth_3channel))
         # QGraphicsView 업데이트
         camera_view.update_views(color_image, depth_colormap)
 
