@@ -118,7 +118,9 @@ class RealSenseApp(QMainWindow):
         self.timers = {}  # 각 카메라별 QTimer 관리
         self.streaming = False
         self.testing=False
+        self.depth_imaging=True
         self.progress_value=0
+        self.depthCheckBox.setChecked(self.depth_imaging)
         # UI 연결
         self.wholeCheck.stateChanged.connect(self.toggle_all_cameras)
         self.playButton.clicked.connect(self.start_streaming)
@@ -133,6 +135,7 @@ class RealSenseApp(QMainWindow):
         self.transferButton.clicked.connect(self.toggle_transfer)
         self.LLMButton.clicked.connect(self.toggle_LLM)
         self.speakProgressBar.setValue(self.progress_value)
+        self.depthCheckBox.stateChanged.connect(self.toggle_depth)
         self.clearButton.clicked.connect(lambda: self.speakEdit.clear())
         self.populate_microphone_list()
         self.testButton.clicked.connect(self.start_microphone_timer)
@@ -152,6 +155,9 @@ class RealSenseApp(QMainWindow):
         
         # 마이크 테스트 관련 UI 설정
         self.miscComboBox.currentIndexChanged.connect(self.start_microphone_stream)  # 마이크 선택 시 연결
+    def toggle_depth(self):
+        self.depth_imaging = self.depthCheckBox.isChecked()
+        print(f"Depth imaging set to: {self.depth_imaging}")
         
     def start_audio_recording(self, output_path):
         """오디오 녹음을 시작 (파일에 직접 저장)"""
@@ -373,16 +379,18 @@ class RealSenseApp(QMainWindow):
                     frame_size=(640, 480)  # 프레임 크기 설정
                 )
                 if camera_view.show_depth:
-                    self.depth_recorder[device] = RealSenseRecorder(
-                        output_path=output_path.replace("_RGB.mp4", "_depth.mp4"),
-                        fps=30,
-                        frame_size=(640, 480)  # 프레임 크기 설정
-                    )
+                    if camera_view.usb_3:
+                        self.depth_recorder[device] = RealSenseRecorder(
+                            output_path=output_path.replace("_RGB.mp4", "_depth.mp4"),
+                            fps=30,
+                            frame_size=(640, 480)  # 프레임 크기 설정
+                        )
                 print(f"Recording started for {camera_name}: {output_path}")
 
             # 오디오 녹음 시작
-            audio_output_path = os.path.join(self.output_path + '/' + self.numberEdit.text(), 'Voice.m4a')
-            self.start_audio_recording(audio_output_path)
+            if self.stream:
+                audio_output_path = os.path.join(self.output_path + '/' + self.numberEdit.text(), 'Voice.m4a')
+                self.start_audio_recording(audio_output_path)
 
             self.recording = True
             self.recordButton.setText("녹화 중단")
@@ -463,7 +471,7 @@ class RealSenseApp(QMainWindow):
 
         # CameraView 생성 (item 텍스트를 camera_name으로 사용)
         camera_name = item.text()
-        camera_view = CameraView(layout, camera_name, show_depth=is_usb_3)
+        camera_view = CameraView(layout, camera_name, show_depth=self.depth_imaging, usb_3=is_usb_3)
 
         # 빈 셀 위치 찾기
         row, col = self.find_empty_cell(layout)
@@ -476,8 +484,9 @@ class RealSenseApp(QMainWindow):
         config = rs.config()
         config.enable_device(serial)
         config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-        if is_usb_3:
-            config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+        if self.depth_imaging:
+            if is_usb_3:
+                config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
         pipeline.start(config)
 
         # QTimer 설정

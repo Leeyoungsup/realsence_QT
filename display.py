@@ -7,11 +7,12 @@ from PyQt5.QtCore import Qt
 
 class CameraView(QWidget):
     """각 카메라에 대해 RGB와 Depth 뷰 및 정보를 관리"""
-    def __init__(self, parent_layout, camera_name, show_depth=True):
+    def __init__(self, parent_layout, camera_name, show_depth=True,usb_3=False):
         super().__init__()
 
         self.camera_name = camera_name  # 카메라 이름 저장
         self.show_depth = show_depth  # Depth 뷰 표시 여부
+        self.usb_3 = usb_3  # Depth 뷰 표시 여부
 
         # 레이아웃 설정
         self.layout = QVBoxLayout(self)
@@ -40,10 +41,8 @@ class CameraView(QWidget):
         self.depth_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.layout.addWidget(QLabel("Depth View", alignment=Qt.AlignCenter))
         self.layout.addWidget(self.depth_view)
-
-        # USB 2.0 메시지 표시 (초기값)
         if not self.show_depth:
-            text_item = QGraphicsTextItem("USB 2.0입니다.")
+            text_item = QGraphicsTextItem("depth 뷰를 표시하지 않습니다.")
             font = QFont()
             font.setPointSize(12)
             text_item.setFont(font)
@@ -56,6 +55,22 @@ class CameraView(QWidget):
                 scene_rect.width() / 2 - text_item.boundingRect().width() / 2,
                 scene_rect.height() / 2 - text_item.boundingRect().height() / 2
             )
+        # USB 2.0 메시지 표시 (초기값)
+        else:
+            if not self.usb_3:
+                text_item = QGraphicsTextItem("USB 2.0입니다.")
+                font = QFont()
+                font.setPointSize(12)
+                text_item.setFont(font)
+                text_item.setDefaultTextColor(Qt.red)
+                self.depth_scene.addItem(text_item)
+
+                # 텍스트를 Depth 뷰의 중앙에 위치시키기
+                scene_rect = self.depth_scene.sceneRect()
+                text_item.setPos(
+                    scene_rect.width() / 2 - text_item.boundingRect().width() / 2,
+                    scene_rect.height() / 2 - text_item.boundingRect().height() / 2
+                )
 
         # FPS 업데이트 타이머
         self.frame_count = 0
@@ -82,19 +97,35 @@ class CameraView(QWidget):
             self.depth_scene.addPixmap(depth_pixmap)
             self.depth_view.fitInView(self.depth_scene.itemsBoundingRect(), Qt.KeepAspectRatio)
         else:
-            text_item = QGraphicsTextItem("USB 2.0입니다.")
-            font = QFont()
-            font.setPointSize(12)
-            text_item.setFont(font)
-            text_item.setDefaultTextColor(Qt.red)
-            self.depth_scene.addItem(text_item)
+            if not self.show_depth:
+                text_item = QGraphicsTextItem("depth 뷰를 표시하지 않습니다.")
+                font = QFont()
+                font.setPointSize(12)
+                text_item.setFont(font)
+                text_item.setDefaultTextColor(Qt.red)
+                self.depth_scene.addItem(text_item)
 
-            # 텍스트를 Depth 뷰의 중앙에 위치시키기
-            scene_rect = self.depth_scene.sceneRect()
-            text_item.setPos(
-                scene_rect.width() / 2 - text_item.boundingRect().width() / 2,
-                scene_rect.height() / 2 - text_item.boundingRect().height() / 2
-            )
+                # 텍스트를 Depth 뷰의 중앙에 위치시키기
+                scene_rect = self.depth_scene.sceneRect()
+                text_item.setPos(
+                    scene_rect.width() / 2 - text_item.boundingRect().width() / 2,
+                    scene_rect.height() / 2 - text_item.boundingRect().height() / 2
+                )
+            else:
+
+                text_item = QGraphicsTextItem("USB 2.0입니다.")
+                font = QFont()
+                font.setPointSize(12)
+                text_item.setFont(font)
+                text_item.setDefaultTextColor(Qt.red)
+                self.depth_scene.addItem(text_item)
+
+                # 텍스트를 Depth 뷰의 중앙에 위치시키기
+                scene_rect = self.depth_scene.sceneRect()
+                text_item.setPos(
+                    scene_rect.width() / 2 - text_item.boundingRect().width() / 2,
+                    scene_rect.height() / 2 - text_item.boundingRect().height() / 2
+                )
 
         # 프레임 카운터 증가
         self.frame_count += 1

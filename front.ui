@@ -115,9 +115,9 @@
    <widget class="QLineEdit" name="outputEdit">
     <property name="geometry">
      <rect>
-      <x>270</x>
+      <x>340</x>
       <y>0</y>
-      <width>761</width>
+      <width>691</width>
       <height>20</height>
      </rect>
     </property>
@@ -390,6 +390,19 @@
     </property>
     <property name="text">
      <string>Test</string>
+    </property>
+   </widget>
+   <widget class="QCheckBox" name="depthCheckBox">
+    <property name="geometry">
+     <rect>
+      <x>270</x>
+      <y>0</y>
+      <width>51</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Depth</string>
     </property>
    </widget>
   </widget>
