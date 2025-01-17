@@ -16,6 +16,9 @@ from PyQt5.QtWidgets import QProxyStyle, QStyle
 from PyQt5.QtWidgets import QStyledItemDelegate
 import naver_stt
 import gpt_sample
+import pyaudio  # 마이크 목록 및 테스트용
+import wave
+
 def load_json(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         return json.load(file)
@@ -98,7 +101,13 @@ class RealSenseRecorder:
 class RealSenseApp(QMainWindow):
     def __init__(self):
         super().__init__()
-
+        # PyAudio 초기화
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.audio_file = None  # 오디오 파일 핸들
+        self.audio_output_path = None
+        self.timer = QTimer()  # 타이머를 이용하여 지속적으로 speakBar 업데이트
+        self.timer.timeout.connect(self.update_microphone_level)
         # UI 로드
         loadUi("front.ui", self)
         data=load_json('checkList.json')
@@ -108,6 +117,7 @@ class RealSenseApp(QMainWindow):
         self.views = {}  # 카메라별 View와 Pipeline 관리
         self.timers = {}  # 각 카메라별 QTimer 관리
         self.streaming = False
+        self.testing=False
         self.progress_value=0
         # UI 연결
         self.wholeCheck.stateChanged.connect(self.toggle_all_cameras)
@@ -124,6 +134,8 @@ class RealSenseApp(QMainWindow):
         self.LLMButton.clicked.connect(self.toggle_LLM)
         self.speakProgressBar.setValue(self.progress_value)
         self.clearButton.clicked.connect(lambda: self.speakEdit.clear())
+        self.populate_microphone_list()
+        self.testButton.clicked.connect(self.start_microphone_timer)
         # 녹화 상태
         self.recording = False
         self.recorder = {}
@@ -134,9 +146,105 @@ class RealSenseApp(QMainWindow):
         self.outputEdit.setText(self.output_path)
         self.numberEdit.setText("D001")
         populate_tree(self.checktreeWidget,data)
+        
         # 카메라 목록 업데이트
         self.populate_camera_list()
-    
+        
+        # 마이크 테스트 관련 UI 설정
+        self.miscComboBox.currentIndexChanged.connect(self.start_microphone_stream)  # 마이크 선택 시 연결
+        
+    def start_audio_recording(self, output_path):
+        """오디오 녹음을 시작 (파일에 직접 저장)"""
+        self.audio_output_path = output_path
+        self.audio_file = wave.open(output_path, 'wb')
+        self.audio_file.setnchannels(1)  # 모노
+        self.audio_file.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
+        self.audio_file.setframerate(44100)
+
+        self.stream = self.audio.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=44100,
+            input=True,
+            frames_per_buffer=1024,
+            stream_callback=self.audio_callback
+        )
+        self.stream.start_stream()
+        print(f"Audio recording started: {output_path}")
+
+    def audio_callback(self, in_data, frame_count, time_info, status):
+        """오디오 데이터를 파일에 직접 저장"""
+        if self.audio_file:
+            self.audio_file.writeframes(in_data)
+        return (None, pyaudio.paContinue)
+
+    def stop_audio_recording(self):
+        """오디오 녹음을 중지하고 파일을 닫음"""
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+            self.stream = None
+
+        if self.audio_file:
+            self.audio_file.close()
+            self.audio_file = None
+            print(f"Audio recording stopped and saved to {self.audio_output_path}")
+            
+    def start_microphone_timer(self):
+        """마이크 레벨 업데이트를 위한 타이머 시작"""
+        if not self.timer.isActive():
+            self.timer.start(33)
+            print("Microphone timer started")
+        else:
+            self.timer.stop()
+            print("Microphone timer stopped")
+    def update_microphone_level(self):
+        """선택된 마이크의 입력 레벨을 speakBar에 업데이트"""
+        try:
+            if self.stream and self.stream.is_active():
+                data = self.stream.read(1024, exception_on_overflow=False)
+                audio_data = np.frombuffer(data, dtype=np.int16)
+
+                # 음성 데이터의 RMS 값을 계산
+                rms = np.sqrt(np.mean(audio_data**2))
+
+                # NaN 값 확인 및 처리
+                if np.isnan(rms):
+                    rms = 0
+
+                # RMS 값을 ProgressBar 범위(0~100)에 맞게 변환
+                level = int(min(100, max(0, rms / 100 * 100)))
+                self.speakBar.setValue(100-level)
+        except Exception as e:
+            print(f"Error updating microphone level: {e}")
+            
+    def start_microphone_stream(self):
+        """선택한 마이크로 오디오 스트림 시작"""
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        selected_index = self.miscComboBox.currentData()  # ComboBox에서 선택한 마이크의 인덱스 가져오기
+        if selected_index is not None:
+            try:
+                self.stream = self.audio.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=44100,
+                    input=True,
+                    input_device_index=selected_index,
+                    frames_per_buffer=1024,
+                )
+                print(f"Microphone stream started on device {selected_index}")
+            except Exception as e:
+                print(f"Error starting microphone stream: {e}")    
+    def populate_microphone_list(self):
+        """시스템의 마이크 목록을 miscComboBox에 추가"""
+        self.miscComboBox.clear()
+        for i in range(self.audio.get_device_count()):
+            device_info = self.audio.get_device_info_by_index(i)
+            if device_info['maxInputChannels'] > 0:  # 입력 채널이 있는 장치만 추가
+                self.miscComboBox.addItem(device_info['name'], i)    
+
     def toggle_LLM(self):
         LLM=gpt_sample.chat()
         if self.speakEdit.toPlainText()=='':
@@ -256,8 +364,8 @@ class RealSenseApp(QMainWindow):
                 camera_name = self.cameraList.item(i).text()  # camera_list에서 이름 가져오기
                 sanitized_name = camera_name.replace(" ", "_").replace(":", "_")  # 파일명에 적합하도록 변경
                 file_name = f"{sanitized_name}_{start_time}_RGB.mp4"  # 이름 + 시간 조합
-                create_path(self.output_path+'/'+self.numberEdit.text())
-                output_path = os.path.join(self.output_path+'/'+self.numberEdit.text(), file_name)
+                create_path(self.output_path + '/' + self.numberEdit.text())
+                output_path = os.path.join(self.output_path + '/' + self.numberEdit.text(), file_name)
 
                 self.recorder[device] = RealSenseRecorder(
                     output_path=output_path,
@@ -271,6 +379,10 @@ class RealSenseApp(QMainWindow):
                         frame_size=(640, 480)  # 프레임 크기 설정
                     )
                 print(f"Recording started for {camera_name}: {output_path}")
+
+            # 오디오 녹음 시작
+            audio_output_path = os.path.join(self.output_path + '/' + self.numberEdit.text(), 'Voice.m4a')
+            self.start_audio_recording(audio_output_path)
 
             self.recording = True
             self.recordButton.setText("녹화 중단")
@@ -287,6 +399,10 @@ class RealSenseApp(QMainWindow):
                         self.depth_recorder[device].close()
                         print(f"Recording stopped for {device.get_info(rs.camera_info.name)}")
                         self.depth_recorder[device] = None
+
+            # 오디오 녹음 중지 및 저장
+            self.stop_audio_recording()
+
             self.recording = False
             self.recordButton.setText("녹화 시작")
     
@@ -474,8 +590,12 @@ class RealSenseApp(QMainWindow):
             pipeline.stop()
         for timer in self.timers.values():
             timer.stop()
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        self.audio.terminate()
+        self.timer.stop()
         event.accept()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
