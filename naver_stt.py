@@ -1,12 +1,15 @@
 import requests
 import json
+from dotenv import load_dotenv
+import os
+
 
 
 class ClovaSpeechClient:
     # Clova Speech invoke URL (앱 등록 시 발급받은 Invoke URL)
-    invoke_url = 'https://clovaspeech-gw.ncloud.com/external/v1/10108/ce13004eb085189211cdf40951017b6d6cc20bd220b27e74e883b304d27bb898'
+    invoke_url = os.getenv("INVOKE_URL")
     # Clova Speech secret key (앱 등록 시 발급받은 Secret Key)
-    secret = 'ce5c3db932d7491b8971e72d745a95ab'
+    secret = os.getenv("SECRET")
 
     def req_url(self, url, completion, callback=None, userdata=None, forbiddens=None, boostings=None, wordAlignment=True, fullText=True, diarization=None, sed=None):
         request_body = {

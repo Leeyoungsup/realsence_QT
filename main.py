@@ -14,8 +14,8 @@ from PyQt5.QtWidgets import QFileDialog
 import json
 from PyQt5.QtWidgets import QProxyStyle, QStyle
 from PyQt5.QtWidgets import QStyledItemDelegate
-
-
+import naver_stt
+import gpt_sample
 def load_json(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         return json.load(file)
@@ -42,7 +42,7 @@ def populate_tree(tree, json_data):
     tree.setHeaderLabels(["항목", "수행 여부"])
     tree.setColumnWidth(0, 300)  # 열 크기 설정
     tree.header().setStretchLastSection(False)  # 마지막 열 자동 확장 비활성화
-
+    tree.itemClicked.connect(handle_item_click)
     # JSON 데이터 추가
     add_items(tree.invisibleRootItem(), json_data)
 
@@ -108,6 +108,7 @@ class RealSenseApp(QMainWindow):
         self.views = {}  # 카메라별 View와 Pipeline 관리
         self.timers = {}  # 각 카메라별 QTimer 관리
         self.streaming = False
+        self.progress_value=0
         # UI 연결
         self.wholeCheck.stateChanged.connect(self.toggle_all_cameras)
         self.playButton.clicked.connect(self.start_streaming)
@@ -119,6 +120,10 @@ class RealSenseApp(QMainWindow):
         self.checktreeWidget.setItemDelegate(WrappingItemDelegate())  # 텍스트 줄바꿈 활성화
         self.resetButton.clicked.connect(self.reset_checktree_widget)
         self.saveButton.clicked.connect(self.toggle_checklist_save)
+        self.transferButton.clicked.connect(self.toggle_transfer)
+        self.LLMButton.clicked.connect(self.toggle_LLM)
+        self.speakProgressBar.setValue(self.progress_value)
+        self.clearButton.clicked.connect(lambda: self.speakEdit.clear())
         # 녹화 상태
         self.recording = False
         self.recorder = {}
@@ -131,6 +136,56 @@ class RealSenseApp(QMainWindow):
         populate_tree(self.checktreeWidget,data)
         # 카메라 목록 업데이트
         self.populate_camera_list()
+    
+    def toggle_LLM(self):
+        LLM=gpt_sample.chat()
+        if self.speakEdit.toPlainText()=='':
+            self.toggle_transfer()
+            self.progress_value=75
+            self.speakProgressBar.setValue(self.progress_value)
+        else:
+            self.progress_value=75
+            self.speakProgressBar.setValue(self.progress_value)
+        response=LLM.response_data(self.speakEdit.toPlainText())
+        json_data = json.loads(response)
+        self.update_checktree_widget(json_data)
+        self.progress_value=100
+        self.speakProgressBar.setValue(self.progress_value)
+    def update_checktree_widget(self, json_data):
+        """checktreeWidget의 항목 상태를 JSON 데이터에 따라 업데이트"""
+        def update_items(tree_item, json_data):
+            """재귀적으로 트리 항목 업데이트"""
+            for i in range(tree_item.childCount()):
+                child_item = tree_item.child(i)
+                key = child_item.text(0)
+                if key in json_data:
+                    value = json_data[key]
+                    if isinstance(value, bool):
+                        # 체크 상태가 비활성화 상태이고 JSON에서 True일 때만 체크
+                        if child_item.checkState(1) == Qt.Unchecked and value:
+                            child_item.setCheckState(1, Qt.Checked)
+                    elif isinstance(value, dict):
+                        update_items(child_item, value)
+
+        root = self.checktreeWidget.invisibleRootItem()
+        update_items(root, json_data)    
+        
+    def toggle_transfer(self):
+        self.progress_value=25
+        self.speakProgressBar.setValue(self.progress_value)
+        client = naver_stt.ClovaSpeechClient()
+        output_path = os.path.join(self.output_path+'/'+self.numberEdit.text(), 'Voice.m4a' )
+        response = client.req_upload(file=output_path , completion='sync')
+        if response.status_code == 200:  # 성공적으로 처리된 경우
+            response_json = response.json()  # JSON 형식으로 변환
+            if 'text' in response_json:  # 'text' 키가 있는지 확인
+                self.speakEdit.setText(response_json['text'])  # 텍스트 데이터 출력
+            else:
+                 self.speakEdit.setText("No text found in response")  # 텍스트 데이터 없음
+        else:  # 에러 발생
+            self.speakEdit.setText(f"Error occurred: {response.status_code} - {response.text}")
+        self.progress_value=50
+        self.speakProgressBar.setValue(self.progress_value)
     def reset_checktree_widget(self):
         """checktreeWidget의 모든 체크 상태를 초기화"""
         def reset_items(item):
@@ -140,7 +195,7 @@ class RealSenseApp(QMainWindow):
                 if child.flags() & Qt.ItemIsUserCheckable:
                     child.setCheckState(1, Qt.Unchecked)  # 체크 해제
                 reset_items(child)
-
+        
         root = self.checktreeWidget.invisibleRootItem()
         reset_items(root)
         print("checktreeWidget의 체크 상태가 초기화되었습니다.") 
